@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.venv/bin/
+uv.lock
+.python-version
+.env
+.env.local
+
+# Node
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+
+# Docker
+docker-compose.override.yml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# Logs & Data
+logs/
+*.log
+uploads/
+*.sqlite

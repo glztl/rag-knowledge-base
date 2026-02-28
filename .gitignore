@@ -32,3 +32,7 @@ logs/
 *.log
 uploads/
 *.sqlite
+
+# UV / Virtual environments
+.venv/
+.python-version

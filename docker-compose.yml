@@ -28,7 +28,7 @@ services:
     container_name: rag-backend
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "11000:11000"
     environment:
       DATABASE_URL: postgresql+asyncpg://raguser:ragpassword@postgres:5432/ragdb
       ENVIRONMENT: development
@@ -51,7 +51,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      NEXT_PUBLIC_API_URL: http://backend:8000
+      NEXT_PUBLIC_API_URL: http://backend:11000
     depends_on:
       - backend
     networks:

@@ -1,5 +1,6 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from contextlib import asynccontextmanager
 
 from app.config import settings
@@ -82,25 +83,18 @@ app = FastAPI(
 )
 
 
-# 注册 Scalar API 文档 (Knife4j 风格)
-app.add_route(
-    "/scalar",
-    get_scalar_api_reference(
+@app.get("/scalar", include_in_schema=False)
+async def scalar_docs(request: Request) -> HTMLResponse:
+    return get_scalar_api_reference(
         openapi_url=app.openapi_url,
-        title=metadata["title"],
-
-        # 推荐主题
+        title=app.title,
         theme=Theme.SATURN,
-
-        # UI 配置
         layout=Layout.MODERN,
         show_sidebar=True,
         hide_models=False,
         dark_mode=False,
         with_default_fonts=True,
-    ),
-    include_in_schema=False,
-)
+    )
 
 
 

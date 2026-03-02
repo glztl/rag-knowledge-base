@@ -8,6 +8,9 @@ from app.db.session import init_db
 
 from scalar_fastapi import get_scalar_api_reference, Layout, Theme
 
+# 在导入部分添加
+from app.api.v1 import chat, documents
+
 
 # API 元数据配置 (类似 Knife4j 文档说明)
 metadata = {
@@ -81,6 +84,10 @@ app = FastAPI(
     docs_url=None,
     redoc_url=None,
 )
+
+# 在路由注册部分添加
+app.include_router(documents.router, prefix="/api/v1/documents", tags=["Documents"])
+app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
 
 
 @app.get("/scalar", include_in_schema=False)

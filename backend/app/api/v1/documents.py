@@ -14,6 +14,8 @@ from app.schemas.document import (
     DocumentDetailResponse,
 )
 from app.core.rag_service import rag_service
+from app.models.user import User
+from app.core.deps import get_current_active_user
 
 router = APIRouter()
 
@@ -26,7 +28,11 @@ ALLOWED_EXTENSIONS = {"pdf", "txt", "md", "docx"}
 
 
 @router.post("/upload", response_model=DocumentUploadResponse)
-async def upload_document(file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):
+async def upload_document(
+    file: UploadFile = File(...), 
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
     """上传文档"""
     # 验证文件类型
     if not file.filename or "." not in file.filename:
@@ -55,6 +61,7 @@ async def upload_document(file: UploadFile = File(...), db: AsyncSession = Depen
         file_size=len(content),
         file_type=ext,
         status="processing",
+        owner_id=current_user.id,
     )
     db.add(document)
     await db.commit()
@@ -64,24 +71,22 @@ async def upload_document(file: UploadFile = File(...), db: AsyncSession = Depen
     try:
         # 加载文档
         documents = rag_service.load_document(file_path, ext)
-        
+
         # 分割文档
         chunks = rag_service.split_documents(documents)
         chunk_texts = [chunk.page_content for chunk in chunks]
-        
+
         # 生成向量
         if chunk_texts:
             embeddings = rag_service.embed_texts(chunk_texts)
-            
+
             # 存储到数据库
-            await rag_service.store_chunks(
-                db, document.id, chunk_texts, embeddings
-            )
-        
+            await rag_service.store_chunks(db, document.id, chunk_texts, embeddings)
+
         # 更新状态
         document.status = "completed"
         await db.commit()
-        
+
         return DocumentUploadResponse(
             id=document.id,
             filename=document.filename,
@@ -94,16 +99,14 @@ async def upload_document(file: UploadFile = File(...), db: AsyncSession = Depen
         document.status = "failed"
         document.error_message = str(e)
         await db.commit()
-        
+
         raise HTTPException(status_code=500, detail=f"文档处理失败：{str(e)}")
 
 
 @router.get("/list", response_model=List[DocumentListResponse])
 async def list_documents(db: AsyncSession = Depends(get_db)):
     """获取文档列表"""
-    result = await db.execute(
-        select(Document).order_by(Document.created_at.desc())
-    )
+    result = await db.execute(select(Document).order_by(Document.created_at.desc()))
     documents = result.scalars().all()
     return documents
 
@@ -111,14 +114,12 @@ async def list_documents(db: AsyncSession = Depends(get_db)):
 @router.get("/{document_id}", response_model=DocumentDetailResponse)
 async def get_document(document_id: int, db: AsyncSession = Depends(get_db)):
     """获取文档详情"""
-    result = await db.execute(
-        select(Document).where(Document.id == document_id)
-    )
+    result = await db.execute(select(Document).where(Document.id == document_id))
     document = result.scalar_one_or_none()
-    
+
     if not document:
         raise HTTPException(status_code=404, detail="文档不存在")
-    
+
     # 获取片段数量
     chunk_result = await db.execute(
         select(func.count(DocumentChunk.id)).where(
@@ -145,20 +146,18 @@ async def get_document(document_id: int, db: AsyncSession = Depends(get_db)):
 @router.delete("/{document_id}")
 async def delete_document(document_id: int, db: AsyncSession = Depends(get_db)):
     """删除文档"""
-    result = await db.execute(
-        select(Document).where(Document.id == document_id)
-    )
+    result = await db.execute(select(Document).where(Document.id == document_id))
     document = result.scalar_one_or_none()
-    
+
     if not document:
         raise HTTPException(status_code=404, detail="文档不存在")
-    
+
     # 删除文件
     if os.path.exists(document.file_path):
         os.remove(document.file_path)
-    
+
     # 删除数据库记录
     await db.delete(document)
     await db.commit()
-    
+
     return {"message": "文档已删除"}

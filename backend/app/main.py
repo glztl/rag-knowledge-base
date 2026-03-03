@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from contextlib import asynccontextmanager
@@ -8,8 +8,12 @@ from app.db.session import init_db
 
 from scalar_fastapi import get_scalar_api_reference, Layout, Theme
 
-# 在导入部分添加
 from app.api.v1 import chat, documents
+
+from app.core.security import get_current_active_user
+from app.api.v1 import auth, documents, chat
+
+from app.models.user import User  # Adjust the import path as needed
 
 
 # API 元数据配置 (类似 Knife4j 文档说明)
@@ -85,7 +89,12 @@ app = FastAPI(
     redoc_url=None,
 )
 
-# 在路由注册部分添加
+
+# 注册路由
+app.include_router(documents.router, prefix="/api/v1/documents", tags=["Documents"])
+app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
+
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
 app.include_router(documents.router, prefix="/api/v1/documents", tags=["Documents"])
 app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
 
@@ -178,3 +187,9 @@ async def test_database():
             "message": str(e),
         }
 
+
+@app.get("/api/v1/protected")
+async def protected_route(
+    current_user: User = Depends(get_current_active_user)
+):
+    return {"message": f"Hello, {current_user.username}!"}

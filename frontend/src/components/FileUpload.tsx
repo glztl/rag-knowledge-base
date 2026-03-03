@@ -56,6 +56,7 @@ export default function FileUpload() {
       const result = await documentApi.upload(file);
       setUploadProgress(`✅ ${result.message}`);
       await loadDocuments();
+      onUploadComplete?.();
     } catch (error: unknown) {
       let message = "上传失败";
       if (error instanceof Error) message = `❌ 上传失败：${error.message}`;
@@ -156,4 +157,8 @@ export default function FileUpload() {
       </div>
     </div>
   );
+}
+
+function onUploadComplete() {
+  throw new Error("Function not implemented.");
 }

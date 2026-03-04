@@ -56,7 +56,6 @@ class RAGService:
         # upload folder
         os.makedirs(settings.UPLOAD_FOLDER, exist_ok=True)
 
-
     def load_document(self, file_path: str, file_type: str) -> List[Document]:
         """加载文档"""
         loaders = {
@@ -69,7 +68,7 @@ class RAGService:
         loader_class = loaders.get(file_type.lower())
         if not loader_class:
             raise ValueError(f"不支持的文件类型: {file_type}")
-        
+
         loader = loader_class(file_path)
         return loader.load()
 
@@ -77,32 +76,29 @@ class RAGService:
         """文档分割"""
         return self.text_splitter.split_documents(documents)
         return self.text_splitter.split_documents(documents)
-    
-    
+
     def embed_texts(self, texts: List[str]) -> List[List[float]]:
         """生成向量"""
         return self.embeddings.embed_documents(texts)
-    
 
     def embed_query(self, query: str) -> List[float]:
         """生成查询向量"""
         return self.embeddings.embed_query(query)
-    
 
     async def store_chunks(
-            self,
-            db: AsyncSession,
-            document_id: int,
-            chunks: List[str],
-            embeddings: List[List[float]],
+        self,
+        db: AsyncSession,
+        document_id: int,
+        chunks: List[str],
+        embeddings: List[List[float]],
     ):
         """存储文档块到数据库"""
         for i, (content, embedding) in enumerate(zip(chunks, embeddings)):
-                    # 确保 embedding 是 list of float，不是字符串
+            
             if isinstance(embedding, str):
                 embedding = json.loads(embedding)
+
             
-            # 转换为 float 列表
             embedding = [float(x) for x in embedding]
             chunk = DocumentChunk(
                 document_id=document_id,
@@ -115,15 +111,14 @@ class RAGService:
 
         await db.commit()
 
-
     async def search_similar(
-            self,
-            db: AsyncSession,
-            query: str,
-            top_k: int = 5,
+        self,
+        db: AsyncSession,
+        query: str,
+        top_k: int = 5,
     ) -> List[dict]:
         """向量相似度搜索"""
-        
+
         # 生成查询向量
         query_embedding = self.embed_query(query)
 
@@ -138,12 +133,10 @@ class RAGService:
                     LIMIT :top_k
                     """
 
-
-        # 将 query_embedding 转为 JSON 字符串（如果数据库字段为 JSON/字符串类型）
+        # 将 query_embedding 转为 JSON 字符串
         embedding_str = json.dumps(query_embedding)
         result = await db.execute(
-            text(query_str),
-            {"embedding": embedding_str, "top_k": top_k}
+            text(query_str), {"embedding": embedding_str, "top_k": top_k}
         )
 
         rows = result.fetchall()
@@ -153,20 +146,21 @@ class RAGService:
                 "content": row.content,
                 "score": float(row.score),
                 "chunk_metadata": row.chunk_metadata,
-                "source": row.chunk_metadata.get("source") if row.chunk_metadata else None,
+                "source": row.chunk_metadata.get("source")
+                if row.chunk_metadata
+                else None,
             }
             for row in rows
         ]
 
-
     async def generate_answer(
-            self,
-            query: str,
-            contexts: List[str],
-            stream: bool = True,
+        self,
+        query: str,
+        contexts: List[str],
+        stream: bool = True,
     ):
         """生成答案"""
-        
+
         # 构建Prompt
         context_text = "\n\n".join(contexts)
         prompt = f"""你是一个智能助手。请基于以下上下文信息回答问题。如果上下文中没有相关信息，请说明你不知道。
@@ -177,29 +171,37 @@ class RAGService:
                 问题：{query}
 
                 请用简洁、准确的语言回答："""
-        
+
         if stream:
             # 流式输出
             return self.llm.stream(prompt)
         else:
             reponse = await self.llm.ainvoke(prompt)
             return reponse
-    
+
 
     async def chat_stream(self, query: str, contexts: List[str]):
-        """聊天接口，流式输出"""
+        """流式聊天生成器"""
         context_text = "\n\n".join(contexts)
         prompt = f"""你是一个智能助手。请基于以下上下文信息回答问题。如果上下文中没有相关信息，请说明你不知道。
 
-                上下文信息：
-                {context_text}
+    上下文信息：
+    {context_text}
 
-                问题：{query}
+    问题：{query}
 
-                请用简洁、准确的语言回答："""
-        
-        for chunk in self.llm.stream(prompt):
-            yield chunk
+    请用简洁、准确的语言回答："""
+
+        print(f"🔍 [RAG] 流式生成，prompt 长度：{len(prompt)}")
+
+        try:
+            for chunk in self.llm.stream(prompt):
+                print(f"📝 [RAG] LLM chunk: {repr(chunk)}")
+                yield chunk
+        except Exception as e:
+            print(f"❌ [RAG] 流式生成失败：{e}")
+            raise
+
 
 # 单例
 rag_service = RAGService()

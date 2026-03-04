@@ -82,10 +82,10 @@ class ChatMessage(Base):
         nullable=False
     )
 
-    sources: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+    sources: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(
         JSON,
         nullable=True
-    )  # RAG参考来源
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

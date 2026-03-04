@@ -46,4 +46,10 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: List[ChatMessage]
-    top_k: int = 3  # 可选，默认检索 top 3
+    top_k: int = Field(default=3, ge=1, le=20) 
+    stream: bool = Field(default=True) # 可选，默认检索 top 3
+    session_id: Optional[int] = None  # ⚠️ 添加这行
+
+class ChatSessionUpdate(BaseModel):
+    """更新对话"""
+    title: Optional[str] = Field(None, min_length=1, max_length=200)

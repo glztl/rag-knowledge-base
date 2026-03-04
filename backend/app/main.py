@@ -96,7 +96,7 @@ app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
 
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
 app.include_router(documents.router, prefix="/api/v1/documents", tags=["Documents"])
-app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
+# app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
 
 
 @app.get("/scalar", include_in_schema=False)

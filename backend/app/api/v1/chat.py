@@ -1,7 +1,9 @@
 from fastapi import APIRouter, HTTPException, Depends
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from typing import Optional
+import json
 
 from app.db.session import get_db
 from app.models.user import User
@@ -9,7 +11,14 @@ from app.models.chat import ChatSession, ChatMessage
 from app.core.security import get_current_active_user
 from app.core.rag_service import rag_service
 
-from app.schemas.chat import ChatSessionResponse, ChatMessageResponse, ChatSessionCreate, ChatSessionDetail, ChatRequest
+from app.schemas.chat import (
+    ChatSessionResponse,
+    ChatMessageResponse,
+    ChatSessionCreate,
+    ChatSessionDetail,
+    ChatRequest,
+    ChatSessionUpdate,
+)
 from app.schemas.document import ChunkSearchResult
 
 router = APIRouter()
@@ -44,7 +53,7 @@ async def list_sessions(
         .order_by(ChatSession.updated_at.desc())
     )
     sessions = result.scalars().all()
-    
+
     # 获取消息数量
     session_list = []
     for session in sessions:
@@ -57,8 +66,37 @@ async def list_sessions(
         session_dict = ChatSessionResponse.model_validate(session)
         session_dict.message_count = message_count
         session_list.append(session_dict)
-    
+
     return session_list
+
+
+@router.patch("/sessions/{session_id}", response_model=ChatSessionResponse)
+async def update_session(
+    session_id: int,
+    session_data: ChatSessionUpdate,  # ⚠️ 包含 title 字段
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """更新对话（标题等）"""
+    result = await db.execute(
+        select(ChatSession).where(
+            ChatSession.id == session_id, ChatSession.user_id == current_user.id
+        )
+    )
+    session = result.scalar_one_or_none()
+
+    if not session:
+        raise HTTPException(status_code=404, detail="对话不存在")
+
+    # 更新标题
+    if session_data.title is not None:
+        session.title = session_data.title
+
+    session.updated_at = func.now()
+    await db.commit()
+    await db.refresh(session)
+
+    return session
 
 
 @router.get("/sessions/{session_id}", response_model=ChatSessionDetail)
@@ -70,15 +108,14 @@ async def get_session(
     """获取对话详情"""
     result = await db.execute(
         select(ChatSession).where(
-            ChatSession.id == session_id,
-            ChatSession.user_id == current_user.id
+            ChatSession.id == session_id, ChatSession.user_id == current_user.id
         )
     )
     session = result.scalar_one_or_none()
-    
+
     if not session:
         raise HTTPException(status_code=404, detail="对话不存在")
-    
+
     # 获取消息
     messages_result = await db.execute(
         select(ChatMessage)
@@ -86,7 +123,7 @@ async def get_session(
         .order_by(ChatMessage.created_at.asc())
     )
     messages = messages_result.scalars().all()
-    
+
     return ChatSessionDetail(
         id=session.id,
         title=session.title,
@@ -106,18 +143,17 @@ async def delete_session(
     """删除对话"""
     result = await db.execute(
         select(ChatSession).where(
-            ChatSession.id == session_id,
-            ChatSession.user_id == current_user.id
+            ChatSession.id == session_id, ChatSession.user_id == current_user.id
         )
     )
     session = result.scalar_one_or_none()
-    
+
     if not session:
         raise HTTPException(status_code=404, detail="对话不存在")
-    
+
     await db.delete(session)
     await db.commit()
-    
+
     return {"message": "对话已删除"}
 
 
@@ -128,37 +164,31 @@ async def chat(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    """聊天问答（保存历史）"""
-    # 获取用户消息
+    """聊天问答（非流式）"""
     user_message = None
     for msg in reversed(request.messages):
         if msg.role == "user":
             user_message = msg.content
             break
-    
+
     if not user_message:
         raise HTTPException(status_code=400, detail="没有用户消息")
-    
-    # 向量搜索
+
     contexts = await rag_service.search_similar(db, user_message, request.top_k)
     context_texts = [c["content"] for c in contexts]
-    
-    # 生成答案
+
     answer = await rag_service.generate_answer(
         user_message, context_texts, stream=False
     )
-    
-    # 保存到数据库（如果有 session_id）
+
     if session_id:
-        # 保存用户消息
         user_msg = ChatMessage(
             session_id=session_id,
             role="user",
             content=user_message,
         )
         db.add(user_msg)
-        
-        # 保存 AI 回复
+
         assistant_msg = ChatMessage(
             session_id=session_id,
             role="assistant",
@@ -166,20 +196,18 @@ async def chat(
             sources=contexts,
         )
         db.add(assistant_msg)
-        
-        # 更新会话标题（如果是第一条消息）
+
         session_result = await db.execute(
             select(ChatSession).where(
-                ChatSession.id == session_id,
-                ChatSession.user_id == current_user.id
+                ChatSession.id == session_id, ChatSession.user_id == current_user.id
             )
         )
         session = session_result.scalar_one_or_none()
         if session and len(contexts) == 0:
             session.title = user_message[:50]
-        
+
         await db.commit()
-    
+
     return {
         "answer": answer,
         "sources": [
@@ -192,3 +220,127 @@ async def chat(
             for c in contexts
         ],
     }
+
+
+@router.post("/stream")
+async def chat_stream(
+    request: ChatRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """聊天问答（流式）"""
+    # ⚠️ 从请求体获取 session_id
+    session_id = request.session_id
+    
+    print(f"🔍 [STREAM] 收到请求，session_id={session_id}")
+    print(f"🔍 [STREAM] 请求体：messages={len(request.messages)}, top_k={request.top_k}")
+    
+    # 获取用户消息
+    user_message = None
+    for msg in reversed(request.messages):
+        if msg.role == "user":
+            user_message = msg.content
+            break
+    
+    if not user_message:
+        raise HTTPException(status_code=400, detail="没有用户消息")
+    
+    print(f"🔍 [STREAM] 用户消息：{user_message}")
+    
+    # 向量搜索
+    contexts = await rag_service.search_similar(db, user_message, request.top_k)
+    context_texts = [c["content"] for c in contexts]
+    
+    print(f"🔍 [STREAM] 上下文数量：{len(contexts)}")
+    
+    # 收集完整回答
+    full_answer = ""
+    
+    async def generate():
+        nonlocal full_answer
+        
+        try:
+            print("🔄 [STREAM] 开始生成回答...")
+            
+            # 流式生成
+            async for chunk in rag_service.chat_stream(user_message, context_texts):
+                full_answer += chunk
+                print(f"📝 [STREAM] 收到 chunk: {repr(chunk)}")
+                yield f"data: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
+            
+            print(f"✅ [STREAM] 生成完成，完整回答：{repr(full_answer)}")
+            yield " [DONE]\n\n"
+            
+            # 保存到数据库
+            if session_id and full_answer:
+                print(f"💾 [STREAM] 保存消息到会话 {session_id}...")
+                
+                try:
+                    # 保存用户消息
+                    user_msg = ChatMessage(
+                        session_id=session_id,
+                        role="user",
+                        content=user_message,
+                    )
+                    db.add(user_msg)
+                    print(f"📝 [STREAM] 用户消息已添加")
+                    
+                    # 保存 AI 回复
+                    assistant_msg = ChatMessage(
+                        session_id=session_id,
+                        role="assistant",
+                        content=full_answer,
+                        sources=contexts,
+                    )
+                    db.add(assistant_msg)
+                    print(f"📝 [STREAM] AI 消息已添加")
+                    
+                    # 更新会话标题
+                    session_result = await db.execute(
+                        select(ChatSession).where(
+                            ChatSession.id == session_id,
+                            ChatSession.user_id == current_user.id
+                        )
+                    )
+                    session = session_result.scalar_one_or_none()
+                    
+                    if session:
+                        if session.title == "新对话" or not session.title:
+                            session.title = user_message[:50]
+                        session.updated_at = func.now()
+                        print(f"📝 [STREAM] 会话标题已更新：{session.title}")
+                    
+                    # 提交事务
+                    await db.commit()
+                    print(f"✅ [STREAM] 消息保存成功！")
+                    
+                    # 验证保存
+                    verify_result = await db.execute(
+                        select(func.count(ChatMessage.id)).where(
+                            ChatMessage.session_id == session_id
+                        )
+                    )
+                    count = verify_result.scalar()
+                    print(f"🔍 [STREAM] 验证：会话 {session_id} 共有 {count} 条消息")
+                    
+                except Exception as save_error:
+                    print(f"❌ [STREAM] 保存失败：{save_error}")
+                    await db.rollback()
+                    raise
+                    
+            elif not full_answer:
+                print(f"⚠️ [STREAM] 回答为空，未保存消息")
+                
+        except Exception as e:
+            print(f"❌ [STREAM] 生成异常：{e}")
+            await db.rollback()
+            yield f" {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+    
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+    )

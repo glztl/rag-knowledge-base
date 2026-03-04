@@ -1,12 +1,11 @@
 "use client";
 
-import React from "react";
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import ChatBox from "@/components/ChatBox";
 import FileUpload from "@/components/FileUpload";
 import { healthApi } from "@/lib/api";
-import { authApi, tokenStorage, createAuthApi } from "@/lib/auth";
+import { authApi, tokenStorage } from "@/lib/auth";
 import {
   Database,
   Server,
@@ -17,10 +16,11 @@ import {
   Plus,
   MessageSquare,
   Trash2,
-  Menu,
-  X,
+  ChevronLeft,
+  ChevronRight,
+  Edit2,
 } from "lucide-react";
-import { AxiosInstance } from "axios";
+
 // 对话会话类型
 interface ChatSession {
   id: number;
@@ -50,27 +50,35 @@ export default function Home() {
   // 对话历史相关
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
+  
+  // 侧边栏状态 - 默认展开
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  
+  // 编辑标题状态
+  const [editingSessionId, setEditingSessionId] = useState<number | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
 
-  // 认证 API 实例
-  const [authApiInstance, setAuthApiInstance] = useState<AxiosInstance | null>(null);
+  // ⚠️ 移除 api state，改用动态导入（与 FileUpload 保持一致）
 
   // 检查登录状态
   useEffect(() => {
     const checkAuth = async () => {
       const token = tokenStorage.getToken();
+      console.log("🔑 检查认证，Token 存在:", !!token);
+
       if (!token) {
+        console.log("⚠️ 无 Token，跳转到登录页");
         router.push("/login");
         return;
       }
 
       try {
-        const api = createAuthApi();
-        setAuthApiInstance(api);
         const userData = await authApi.getCurrentUser(token);
+        console.log("✅ 用户信息:", userData);
         setUser(userData);
         setIsLoaded(true);
       } catch (error) {
+        console.error("❌ 认证失败:", error);
         tokenStorage.removeToken();
         router.push("/login");
       }
@@ -101,98 +109,160 @@ export default function Home() {
     checkStatus();
   }, [isLoaded]);
 
-  // 加载对话历史
+  // ⚠️ 获取 API 实例的辅助函数
+  const getApi = async () => {
+    return await import('@/lib/auth').then(m => m.getAuthApi());
+  };
+
+  // ⚠️ 加载对话历史 - 动态导入 api
   const loadSessions = useCallback(async () => {
-    if (!authApiInstance) return;
-
     try {
-      const response = await authApiInstance.get("/api/v1/chat/sessions");
+      console.log("📋 加载对话历史...");
+      const api = await getApi();
+      console.log("🔧 API 实例类型:", typeof api, typeof api.get);
+      const response = await api.get("/api/v1/chat/sessions");
+      console.log("✅ 对话历史:", response.data);
       setSessions(response.data);
-    } catch (error) {
-      console.error("加载对话历史失败:", error);
+    } catch (error: any) {
+      console.error("❌ 加载对话历史失败:", error.response?.data || error);
     }
-  }, [authApiInstance]);
+  }, []);  // ⚠️ 空依赖数组
 
-useEffect(() => {
-  if (!isLoaded) return;
+  useEffect(() => {
+    if (isLoaded) {
+      loadSessions();
+    }
+  }, [isLoaded, loadSessions]);
 
-  (async () => {
-    await loadSessions();
-  })();
-}, [isLoaded, loadSessions]);
-
-  // 创建新对话
+  // ⚠️ 创建新对话 - 动态导入 api
   const createNewSession = async () => {
-    if (!authApiInstance) return;
-
     try {
-      const response = await authApiInstance.post("/api/v1/chat/sessions", {
+      console.log("➕ 创建新对话...");
+      const api = await getApi();
+      const response = await api.post("/api/v1/chat/sessions", {
         title: "新对话",
       });
       const newSession = response.data;
       setSessions([newSession, ...sessions]);
       setCurrentSessionId(newSession.id);
-    } catch (error) {
-      console.error("创建对话失败:", error);
+      console.log("✅ 新对话创建成功:", newSession.id);
+    } catch (error: any) {
+      console.error("❌ 创建对话失败:", error.response?.data || error);
     }
   };
 
   // 切换对话
   const switchSession = (sessionId: number) => {
+    console.log("🔄 切换对话:", sessionId);
     setCurrentSessionId(sessionId);
-    // 在移动端自动关闭侧边栏
-    if (window.innerWidth < 1024) {
-      setIsSidebarOpen(false);
-    }
+    setEditingSessionId(null);
   };
 
-  // 删除对话
-  const deleteSession = async (
-    sessionId: number,
-    e: React.MouseEvent
-  ) => {
+  // ⚠️ 删除对话 - 动态导入 api
+  const deleteSession = async (sessionId: number, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!confirm("确定要删除这个对话吗？")) return;
 
-    if (!authApiInstance) return;
-
     try {
-      await authApiInstance.delete(`/api/v1/chat/sessions/${sessionId}`);
+      console.log("🗑️ 删除对话:", sessionId);
+      const api = await getApi();
+      await api.delete(`/api/v1/chat/sessions/${sessionId}`);
       setSessions(sessions.filter((s) => s.id !== sessionId));
       if (currentSessionId === sessionId) {
         setCurrentSessionId(null);
       }
-    } catch (error) {
-      console.error("删除对话失败:", error);
+      console.log("✅ 对话删除成功");
+    } catch (error: any) {
+      console.error("❌ 删除对话失败:", error.response?.data || error);
+    }
+  };
+
+  // 开始编辑标题
+  const startEditTitle = (session: ChatSession, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingSessionId(session.id);
+    setEditingTitle(session.title);
+  };
+
+  // ⚠️ 保存标题 - 动态导入 api
+  const saveTitle = async (sessionId: number) => {
+    if (!editingTitle.trim()) return;
+
+    try {
+      console.log("💾 保存标题:", sessionId, editingTitle);
+      const api = await getApi();
+      await api.patch(`/api/v1/chat/sessions/${sessionId}`, {
+        title: editingTitle.trim(),
+      });
+      setSessions(sessions.map(s => 
+        s.id === sessionId ? { ...s, title: editingTitle.trim() } : s
+      ));
+      setEditingSessionId(null);
+      console.log("✅ 标题保存成功");
+    } catch (error: any) {
+      console.error("❌ 标题保存失败:", error.response?.data || error);
+    }
+  };
+
+  // 取消编辑
+  const cancelEdit = () => {
+    setEditingSessionId(null);
+    setEditingTitle("");
+  };
+
+  // 处理编辑回车
+  const handleEditKeyDown = (e: React.KeyboardEvent, sessionId: number) => {
+    if (e.key === "Enter") {
+      saveTitle(sessionId);
+    } else if (e.key === "Escape") {
+      cancelEdit();
     }
   };
 
   // 退出登录
   const handleLogout = () => {
+    console.log("👋 退出登录");
     tokenStorage.removeToken();
     router.push("/login");
   };
 
   // 格式化时间
   const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    if (!dateString) return "未知时间";
+    
+    try {
+      const date = new Date(dateString);
+      
+      if (isNaN(date.getTime())) {
+        console.warn("无效日期:", dateString);
+        return "未知时间";
+      }
+      
+      const now = new Date();
+      const diff = now.getTime() - date.getTime();
+      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
 
-    if (days === 0) return "今天";
-    if (days === 1) return "昨天";
-    if (days < 7) return `${days}天前`;
-    return date.toLocaleDateString("zh-CN");
+      if (days === 0) return "今天";
+      if (days === 1) return "昨天";
+      if (days < 7) return `${days}天前`;
+      return date.toLocaleDateString("zh-CN", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+      });
+    } catch (error) {
+      console.error("日期格式化失败:", error, dateString);
+      return "未知时间";
+    }
   };
 
   // 加载时显示
   if (!isLoaded) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-gray-50 to-gray-100">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800">
         <div className="text-center">
           <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600">加载中...</p>
+          <p className="text-gray-600 dark:text-gray-400">加载中...</p>
         </div>
       </div>
     );
@@ -205,15 +275,16 @@ useEffect(() => {
         <div className="max-w-[1600px] mx-auto px-4 py-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
-              {/* 侧边栏切换按钮 */}
+              {/* 侧边栏折叠按钮 */}
               <button
                 onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg lg:hidden"
+                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition"
+                title={isSidebarOpen ? "收起侧边栏" : "展开侧边栏"}
               >
                 {isSidebarOpen ? (
-                  <X className="w-5 h-5 text-gray-600" />
+                  <ChevronLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
                 ) : (
-                  <Menu className="w-5 h-5 text-gray-600" />
+                  <ChevronRight className="w-5 h-5 text-gray-600 dark:text-gray-400" />
                 )}
               </button>
 
@@ -223,7 +294,6 @@ useEffect(() => {
             </div>
 
             <div className="flex items-center space-x-4">
-              {/* 后端状态 */}
               <div className="hidden md:flex items-center space-x-4 text-sm">
                 <div className="flex items-center space-x-1">
                   <Server className="w-4 h-4 text-gray-500" />
@@ -251,7 +321,6 @@ useEffect(() => {
                 </div>
               </div>
 
-              {/* 用户信息 */}
               <div className="flex items-center space-x-3 pl-4 border-l border-gray-200 dark:border-gray-700">
                 <div className="flex items-center space-x-2">
                   <User className="w-4 h-4 text-gray-500" />
@@ -275,14 +344,13 @@ useEffect(() => {
       {/* 主内容区 */}
       <div className="max-w-[1600px] mx-auto px-4 py-4">
         <div className="flex h-[calc(100vh-80px)] gap-4">
-          {/* 左侧：对话历史侧边栏 */}
+          {/* 左侧：对话历史侧边栏 - 可折叠 */}
           <div
             className={`${
               isSidebarOpen ? "w-64" : "w-0"
             } transition-all duration-300 overflow-hidden flex-shrink-0`}
           >
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg h-full flex flex-col">
-              {/* 新建对话按钮 */}
               <div className="p-3 border-b border-gray-200 dark:border-gray-700">
                 <button
                   onClick={createNewSession}
@@ -293,10 +361,9 @@ useEffect(() => {
                 </button>
               </div>
 
-              {/* 对话列表 */}
               <div className="flex-1 overflow-y-auto p-2 space-y-1">
                 {sessions.length === 0 ? (
-                  <p className="text-sm text-gray-500 text-center py-8">
+                  <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-8">
                     暂无对话历史
                   </p>
                 ) : (
@@ -312,23 +379,51 @@ useEffect(() => {
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center space-x-2">
-                            <MessageSquare className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                            <p className="text-sm font-medium text-gray-800 dark:text-white truncate">
-                              {session.title}
-                            </p>
-                          </div>
-                          <p className="text-xs text-gray-500 mt-1">
-                            {formatDate(session.updated_at)} ·{" "}
-                            {session.message_count} 条消息
-                          </p>
+                          {/* 编辑模式 */}
+                          {editingSessionId === session.id ? (
+                            <input
+                              type="text"
+                              value={editingTitle}
+                              onChange={(e) => setEditingTitle(e.target.value)}
+                              onKeyDown={(e) => handleEditKeyDown(e, session.id)}
+                              onBlur={() => saveTitle(session.id)}
+                              className="w-full text-sm bg-white dark:bg-gray-600 border border-blue-500 rounded px-2 py-1 focus:outline-none"
+                              autoFocus
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          ) : (
+                            <>
+                              <div className="flex items-center space-x-2">
+                                <MessageSquare className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                                <p className="text-sm font-medium text-gray-800 dark:text-white truncate">
+                                  {session.title}
+                                </p>
+                              </div>
+                              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                {formatDate(session.updated_at)} ·{" "}
+                                {session.message_count} 条消息
+                              </p>
+                            </>
+                          )}
                         </div>
-                        <button
-                          onClick={(e) => deleteSession(session.id, e)}
-                          className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-500 transition"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
+                        
+                        {/* 操作按钮 */}
+                        <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition">
+                          <button
+                            onClick={(e) => startEditTitle(session, e)}
+                            className="p-1 text-gray-400 hover:text-blue-500 transition"
+                            title="编辑标题"
+                          >
+                            <Edit2 className="w-3 h-3" />
+                          </button>
+                          <button
+                            onClick={(e) => deleteSession(session.id, e)}
+                            className="p-1 text-gray-400 hover:text-red-500 transition"
+                            title="删除"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))
@@ -339,13 +434,17 @@ useEffect(() => {
 
           {/* 中间：聊天窗口 */}
           <div className="flex-1 min-w-0">
-            <ChatBox sessionId={currentSessionId} onSessionChange={setCurrentSessionId} />
+            <ChatBox
+              sessionId={currentSessionId}
+              onSessionChange={setCurrentSessionId}
+              onMessageSent={loadSessions}
+            />
           </div>
 
           {/* 右侧：文件上传 */}
-            <div className="w-80 flex-shrink-0 hidden xl:block">
-            <FileUpload />
-            </div>
+          <div className="w-80 flex-shrink-0 hidden xl:block">
+            <FileUpload onUploadComplete={loadSessions} />
+          </div>
         </div>
       </div>
     </main>

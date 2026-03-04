@@ -4,30 +4,9 @@ import { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Send, Loader2, User, Bot } from "lucide-react";
-import { chatApi, createAuthApi } from "@/lib/api";
-import type { AxiosInstance } from "axios";
+import { chatApi } from "@/lib/api";
 
 interface Message {
-  role: "user" | "assistant";
-  content: string;
-  sources?: Array<{
-    id: number;
-    content: string;
-    score: number;
-  }>;
-}
-
-interface ApiMessage {
-  role: "user" | "assistant";
-  content: string;
-  sources?: Array<{
-    id: number;
-    content: string;
-    score: number;
-  }>;
-}
-
-interface HistoryMessage {
   role: "user" | "assistant";
   content: string;
   sources?: Array<{
@@ -40,37 +19,23 @@ interface HistoryMessage {
 interface ChatBoxProps {
   sessionId: number | null;
   onSessionChange: (sessionId: number | null) => void;
+  onMessageSent?: () => void;
 }
 
-export default function ChatBox({ sessionId, onSessionChange }: ChatBoxProps) {
+export default function ChatBox({
+  sessionId,
+  onSessionChange,
+  onMessageSent
+}: ChatBoxProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
+
+  const streamingContentRef = useRef("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const authApiInstance = useRef<AxiosInstance | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // 初始化认证 API
-  useEffect(() => {
-    const loadHistory = async () => {
-      try {
-        const response = await authApiInstance.current!.get(
-          `/api/v1/chat/sessions/${sessionId}`
-        );
-        const historyMessages = response.data.messages.map((msg: HistoryMessage) => ({
-          role: msg.role,
-          content: msg.content,
-          sources: msg.sources,
-        }));
-        setMessages(historyMessages);
-      } catch (error) {
-        console.error("加载历史消息失败:", error);
-      }
-    };
-
-    loadHistory();
-  }, [sessionId]);
-  // 自动滚动到底部
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
@@ -79,9 +44,55 @@ export default function ChatBox({ sessionId, onSessionChange }: ChatBoxProps) {
     scrollToBottom();
   }, [messages, streamingContent]);
 
-  // 发送消息
+  // 加载历史消息
+  useEffect(() => {
+    if (!sessionId) {
+      setMessages([]);
+      return;
+    }
+
+    const loadHistory = async () => {
+      try {
+        console.log("📜 加载会话消息:", sessionId);
+        const api = await import('@/lib/auth').then(m => m.getAuthApi());
+        const response = await api.get(`/api/v1/chat/sessions/${sessionId}`);
+        console.log("📥 会话详情:", response.data);
+        console.log("📥 消息数量:", response.data.messages?.length);
+
+        interface ApiMessage {
+          role: "user" | "assistant";
+          content: string;
+          sources?: Array<{
+            id: number;
+            content: string;
+            score: number;
+          }>;
+        }
+
+        const historyMessages = response.data.messages.map((msg: ApiMessage) => ({
+          role: msg.role,
+          content: msg.content,
+          sources: msg.sources,
+        }));
+
+        console.log("✅ 消息加载成功:", historyMessages.length, "条");
+        setMessages(historyMessages);
+      } catch (error: unknown) {
+        if (error && typeof error === "object" && "response" in error) {
+          // @ts-expect-error: error.response may exist
+          console.error("❌ 加载历史消息失败:", error.response?.data);
+        } else {
+          console.error("❌ 加载历史消息失败:", error);
+        }
+      }
+    };
+
+    loadHistory();
+  }, [sessionId]);
+
+  // 发送消息部分 - 确保参数顺序正确
   const sendMessage = async () => {
-    if (!input.trim() || isLoading) return;
+    if (!input.trim() || isLoading || !sessionId) return;
 
     const userMessage: Message = {
       role: "user",
@@ -92,51 +103,76 @@ export default function ChatBox({ sessionId, onSessionChange }: ChatBoxProps) {
     setInput("");
     setIsLoading(true);
     setStreamingContent("");
+    streamingContentRef.current = "";
+
+    console.log('📤 发送消息:', userMessage.content);
+    console.log('📤 会话 ID:', sessionId);
 
     try {
-      // 使用流式聊天
+      // ⚠️ 参数顺序必须严格匹配：messages, top_k, session_id, onChunk, onDone, onError
       await chatApi.chatStream(
+        // 1. messages
         [...messages, userMessage].map((m) => ({
           role: m.role,
           content: m.content,
         })),
+        // 2. top_k
         5,
-        // onChunk
+        // 3. session_id (必须是数字！)
+        sessionId,
+        // 4. onChunk
         (content) => {
-          setStreamingContent((prev) => prev + content);
+          console.log('💬 收到内容:', content);
+          setStreamingContent((prev) => {
+            const newContent = prev + content;
+            streamingContentRef.current = newContent;  // ⚠️ 同步更新 ref
+            console.log('📝 累积内容:', streamingContentRef.current);
+            return newContent;
+          });
         },
-        // onDone
+        // 5. onDone
         () => {
-          const assistantMessage: Message = {
-            role: "assistant",
-            content: streamingContent,
-          };
-          setMessages((prev) => [...prev, assistantMessage]);
+          console.log('✅ onDone 调用');
+          console.log('✅ 最终内容:', streamingContentRef.current);
+
+          if (streamingContentRef.current) {
+            const assistantMessage: Message = {
+              role: "assistant",
+              content: streamingContentRef.current,
+            };
+            setMessages((prev) => [...prev, assistantMessage]);
+            console.log('✅ 消息已添加到列表');
+          }
+
           setStreamingContent("");
           setIsLoading(false);
+          onMessageSent?.();
         },
-        // onError
+        // 6. onError
         (error) => {
+          console.error('❌ onError 调用:', error);
           const errorMessage: Message = {
             role: "assistant",
-            content: `❌ 错误：${error}`,
+            content: `❌ 错误：${error || '未知错误'}`,
           };
           setMessages((prev) => [...prev, errorMessage]);
           setStreamingContent("");
           setIsLoading(false);
+          onMessageSent?.();
         }
       );
     } catch (error) {
+      console.error('❌ 发送异常:', error);
       const errorMessage: Message = {
         role: "assistant",
         content: `❌ 请求失败：${error instanceof Error ? error.message : "未知错误"}`,
       };
       setMessages((prev) => [...prev, errorMessage]);
       setIsLoading(false);
+      onMessageSent?.();
     }
   };
 
-  // 处理回车发送
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -144,115 +180,72 @@ export default function ChatBox({ sessionId, onSessionChange }: ChatBoxProps) {
     }
   };
 
-  // 清空对话
   const clearChat = () => {
     setMessages([]);
     setStreamingContent("");
+    streamingContentRef.current = "";
     onSessionChange(null);
   };
 
   return (
     <div className="flex flex-col h-full bg-white dark:bg-gray-800 rounded-lg shadow-lg">
-      {/* 头部 */}
       <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
         <h2 className="text-lg font-semibold text-gray-800 dark:text-white">
           🤖 AI 助手
-          {sessionId && (
-            <span className="text-sm font-normal text-gray-500 ml-2">
-              (会话中)
-            </span>
-          )}
         </h2>
         <button
           onClick={clearChat}
-          className="px-3 py-1 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+          className="px-3 py-1 text-sm text-gray-500 hover:text-gray-700"
         >
           清空对话
         </button>
       </div>
 
-      {/* 消息列表 */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 && !streamingContent && (
-          <div className="text-center text-gray-500 dark:text-gray-400 mt-20">
-            <p className="text-lg">👋 你好！我是你的 AI 知识库助手</p>
-            <p className="text-sm mt-2">
-              上传文档后，我可以基于文档内容回答问题
-            </p>
-            {!sessionId && (
-              <p className="text-xs mt-4 text-gray-400">
-                💡 提示：创建或选择一个对话会话开始聊天
-              </p>
-            )}
+          <div className="text-center text-gray-500 mt-20">
+            <p>👋 你好！我是你的 AI 知识库助手</p>
           </div>
         )}
 
         {messages.map((message, index) => (
           <div
             key={index}
-            className={`flex items-start space-x-3 ${
-              message.role === "user" ? "flex-row-reverse space-x-reverse" : ""
-            }`}
-          >
-            <div
-              className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
-                message.role === "user"
-                  ? "bg-blue-500"
-                  : "bg-green-500"
+            className={`flex items-start space-x-3 ${message.role === "user" ? "flex-row-reverse space-x-reverse" : ""
               }`}
-            >
+          >
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center ${message.role === "user" ? "bg-blue-500" : "bg-green-500"
+              }`}>
               {message.role === "user" ? (
                 <User className="w-5 h-5 text-white" />
               ) : (
                 <Bot className="w-5 h-5 text-white" />
               )}
             </div>
-            <div
-              className={`flex-1 max-w-[80%] p-3 rounded-lg ${
-                message.role === "user"
-                  ? "bg-blue-500 text-white"
-                  : "bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200"
-              }`}
-            >
-              <div className="prose prose-sm dark:prose-invert max-w-none">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {message.content}
-                </ReactMarkdown>
-              </div>
-              {message.sources && message.sources.length > 0 && (
-                <div className="mt-2 text-xs opacity-70">
-                  <p className="font-semibold">📚 参考来源：</p>
-                  {message.sources.slice(0, 3).map((source, i) => (
-                    <p key={i} className="truncate">
-                      • {source.content.substring(0, 100)}...
-                    </p>
-                  ))}
-                </div>
-              )}
+            <div className={`flex-1 max-w-[80%] p-3 rounded-lg ${message.role === "user"
+              ? "bg-blue-500 text-white"
+              : "bg-gray-100 dark:bg-gray-700"
+              }`}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {message.content}
+              </ReactMarkdown>
             </div>
           </div>
         ))}
 
-        {/* 流式响应中 */}
         {streamingContent && (
           <div className="flex items-start space-x-3">
-            <div className="flex-shrink-0 w-8 h-8 rounded-full bg-green-500 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-full bg-green-500 flex items-center justify-center">
               <Bot className="w-5 h-5 text-white" />
             </div>
-            <div className="flex-1 max-w-[80%] p-3 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200">
-              <div className="prose prose-sm dark:prose-invert max-w-none">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {streamingContent}
-                </ReactMarkdown>
-              </div>
-              {isLoading && (
-                <span className="inline-block w-2 h-4 ml-1 bg-gray-400 animate-pulse" />
-              )}
+            <div className="flex-1 max-w-[80%] p-3 rounded-lg bg-gray-100 dark:bg-gray-700">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {streamingContent}
+              </ReactMarkdown>
             </div>
           </div>
         )}
 
-        {/* 加载状态 */}
         {isLoading && !streamingContent && (
           <div className="flex items-center space-x-2 text-gray-500">
             <Loader2 className="w-4 h-4 animate-spin" />
@@ -263,33 +256,26 @@ export default function ChatBox({ sessionId, onSessionChange }: ChatBoxProps) {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* 输入框 */}
-      <div className="p-4 border-t border-gray-200 dark:border-gray-700">
+      <div className="p-4 border-t border-gray-200">
         <div className="flex items-end space-x-2">
           <textarea
+            ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={sessionId ? "输入问题，按 Enter 发送..." : "请先创建或选择一个对话会话"}
-            className="flex-1 p-3 border border-gray-300 dark:border-gray-600 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white disabled:bg-gray-100 dark:disabled:bg-gray-800"
+            placeholder="输入问题，按 Enter 发送..."
+            className="flex-1 p-3 border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
             rows={2}
             disabled={isLoading || !sessionId}
           />
           <button
             onClick={sendMessage}
             disabled={isLoading || !input.trim() || !sessionId}
-            className="p-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:bg-gray-400 disabled:cursor-not-allowed transition"
+            className="p-3 bg-blue-500 text-white rounded-lg disabled:bg-gray-400"
           >
-            {isLoading ? (
-              <Loader2 className="w-5 h-5 animate-spin" />
-            ) : (
-              <Send className="w-5 h-5" />
-            )}
+            {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
           </button>
         </div>
-        <p className="text-xs text-gray-500 mt-2 text-center">
-          按 Enter 发送，Shift + Enter 换行
-        </p>
       </div>
     </div>
   );

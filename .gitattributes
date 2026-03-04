@@ -1,7 +1,7 @@
-﻿# 所有文本文件使用 LF
+﻿
 * text=auto eol=lf
 
-# 确保特定文件使用 LF
+
 *.ts text eol=lf
 *.tsx text eol=lf
 *.js text eol=lf
@@ -17,6 +17,6 @@
 *.env text eol=lf
 *.gitignore text eol=lf
 
-# Windows 批处理文件使用 CRLF
+
 *.bat text eol=crlf
 *.cmd text eol=crlf

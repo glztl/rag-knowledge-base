@@ -58,8 +58,6 @@ export default function Home() {
   const [editingSessionId, setEditingSessionId] = useState<number | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
 
-  // ⚠️ 移除 api state，改用动态导入（与 FileUpload 保持一致）
-
   // 检查登录状态
   useEffect(() => {
     const checkAuth = async () => {
@@ -67,7 +65,7 @@ export default function Home() {
       console.log("🔑 检查认证，Token 存在:", !!token);
 
       if (!token) {
-        console.log("⚠️ 无 Token，跳转到登录页");
+        console.log(" 无 Token，跳转到登录页");
         router.push("/login");
         return;
       }
@@ -109,12 +107,12 @@ export default function Home() {
     checkStatus();
   }, [isLoaded]);
 
-  // ⚠️ 获取 API 实例的辅助函数
+  // 获取 API 实例的辅助函数
   const getApi = async () => {
     return await import('@/lib/auth').then(m => m.getAuthApi());
   };
 
-  // ⚠️ 加载对话历史 - 动态导入 api
+  // 加载对话历史 - 动态导入 api
   const loadSessions = useCallback(async () => {
     try {
       console.log("📋 加载对话历史...");
@@ -123,10 +121,15 @@ export default function Home() {
       const response = await api.get("/api/v1/chat/sessions");
       console.log("✅ 对话历史:", response.data);
       setSessions(response.data);
-    } catch (error: any) {
-      console.error("❌ 加载对话历史失败:", error.response?.data || error);
+    } catch (error: unknown) {
+      if (typeof error === "object" && error !== null && "response" in error) {
+        // @ts-expect-error: response may exist on error
+        console.error("❌ 加载对话历史失败:", error.response?.data || error);
+      } else {
+        console.error("❌ 加载对话历史失败:", error);
+      }
     }
-  }, []);  // ⚠️ 空依赖数组
+  }, []);  // 空依赖数组
 
   useEffect(() => {
     if (isLoaded) {
@@ -134,7 +137,7 @@ export default function Home() {
     }
   }, [isLoaded, loadSessions]);
 
-  // ⚠️ 创建新对话 - 动态导入 api
+  // 创建新对话 - 动态导入 api
   const createNewSession = async () => {
     try {
       console.log("➕ 创建新对话...");
@@ -146,8 +149,13 @@ export default function Home() {
       setSessions([newSession, ...sessions]);
       setCurrentSessionId(newSession.id);
       console.log("✅ 新对话创建成功:", newSession.id);
-    } catch (error: any) {
-      console.error("❌ 创建对话失败:", error.response?.data || error);
+    } catch (error: unknown) {
+      if (typeof error === "object" && error !== null && "response" in error) {
+        // @ts-expect-error: response may exist on error
+        console.error("❌ 创建对话失败:", error.response?.data || error);
+      } else {
+        console.error("❌ 创建对话失败:", error);
+      }
     }
   };
 
@@ -158,7 +166,7 @@ export default function Home() {
     setEditingSessionId(null);
   };
 
-  // ⚠️ 删除对话 - 动态导入 api
+  // 删除对话 - 动态导入 api
   const deleteSession = async (sessionId: number, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!confirm("确定要删除这个对话吗？")) return;
@@ -172,8 +180,13 @@ export default function Home() {
         setCurrentSessionId(null);
       }
       console.log("✅ 对话删除成功");
-    } catch (error: any) {
-      console.error("❌ 删除对话失败:", error.response?.data || error);
+    } catch (error: unknown) {
+      if (typeof error === "object" && error !== null && "response" in error) {
+        // @ts-expect-error: response may exist on error
+        console.error("❌ 删除对话失败:", error.response?.data || error);
+      } else {
+        console.error("❌ 删除对话失败:", error);
+      }
     }
   };
 
@@ -184,7 +197,7 @@ export default function Home() {
     setEditingTitle(session.title);
   };
 
-  // ⚠️ 保存标题 - 动态导入 api
+  // 保存标题 - 动态导入 api
   const saveTitle = async (sessionId: number) => {
     if (!editingTitle.trim()) return;
 
@@ -199,8 +212,13 @@ export default function Home() {
       ));
       setEditingSessionId(null);
       console.log("✅ 标题保存成功");
-    } catch (error: any) {
-      console.error("❌ 标题保存失败:", error.response?.data || error);
+    } catch (error: unknown) {
+      if (typeof error === "object" && error !== null && "response" in error) {
+        // @ts-expect-error: response may exist on error
+        console.error("❌ 标题保存失败:", error.response?.data || error);
+      } else {
+        console.error("❌ 标题保存失败:", error);
+      }
     }
   };
 

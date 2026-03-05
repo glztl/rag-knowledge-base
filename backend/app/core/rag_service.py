@@ -24,6 +24,8 @@ from app.config import settings
 from app.models.document import DocumentChunk
 from langchain_core.documents import Document
 
+from app.core import prompts
+
 
 class RAGService:
     """RAG 服务类，负责处理文档上传、文本分割、向量化和问答"""
@@ -94,11 +96,9 @@ class RAGService:
     ):
         """存储文档块到数据库"""
         for i, (content, embedding) in enumerate(zip(chunks, embeddings)):
-            
             if isinstance(embedding, str):
                 embedding = json.loads(embedding)
 
-            
             embedding = [float(x) for x in embedding]
             chunk = DocumentChunk(
                 document_id=document_id,
@@ -153,54 +153,90 @@ class RAGService:
             for row in rows
         ]
 
-    async def generate_answer(
-        self,
-        query: str,
-        contexts: List[str],
-        stream: bool = True,
-    ):
-        """生成答案"""
-
-        # 构建Prompt
-        context_text = "\n\n".join(contexts)
-        prompt = f"""你是一个智能助手。请基于以下上下文信息回答问题。如果上下文中没有相关信息，请说明你不知道。
-
-                上下文信息：
-                {context_text}
-
-                问题：{query}
-
-                请用简洁、准确的语言回答："""
-
-        if stream:
-            # 流式输出
-            return self.llm.stream(prompt)
+    def _build_prompt(self, query: str, contexts: List[dict]):
+        """构建 Prompt"""
+        # 获取 Prompt 模板
+        prompt_with_context = settings.RAG_PROMPT_WITH_CONTEXT or prompts.RAG_PROMPT_WITH_CONTEXT
+        prompt_without_context = settings.RAG_PROMPT_WITHOUT_CONTEXT or prompts.RAG_PROMPT_WITHOUT_CONTEXT
+        
+        # ⚠️ 修复：确保 contexts 是字典列表
+        print(f"🔍 [RAG] contexts 类型：{type(contexts)}, 长度：{len(contexts)}")
+        if contexts:
+            print(f"🔍 [RAG] 第一个元素类型：{type(contexts[0])}")
+        
+        # ⚠️ 修复：安全地过滤相关内容
+        threshold = settings.SIMILARITY_THRESHOLD
+        relevant_contexts = []
+        
+        for c in contexts:
+            try:
+                # 如果是字典，获取 score
+                if isinstance(c, dict):
+                    score = c.get("score", 0)
+                    if score >= threshold:
+                        relevant_contexts.append(c)
+                # 如果是字符串，直接使用（无相似度信息）
+                elif isinstance(c, str):
+                    relevant_contexts.append({"content": c, "score": 1.0})
+            except Exception as e:
+                print(f"⚠️ [RAG] 处理 context 失败：{e}")
+                continue
+        
+        # ⚠️ 日志输出
+        print(f"🔍 [RAG] 检索到 {len(contexts)} 条内容")
+        print(f"🔍 [RAG] 相关内容 {len(relevant_contexts)} 条（阈值：{threshold}）")
+        
+        for i, c in enumerate(relevant_contexts[:3]):  # 只显示前 3 条
+            print(f"   [{i}] 相似度：{c.get('score', 0):.3f}")
+            print(f"       内容：{c.get('content', '')[:100]}...")
+        
+        if relevant_contexts:
+            # 有相关内容
+            context_text = "\n\n".join([c.get("content", str(c)) for c in relevant_contexts])
+            
+            # 限制上下文长度
+            if len(context_text) > settings.MAX_CONTEXT_LENGTH:
+                context_text = context_text[:settings.MAX_CONTEXT_LENGTH] + "..."
+            
+            print(f"✅ [RAG] 使用文档内容回答，上下文长度：{len(context_text)}")
+            return prompt_with_context.format(
+                context_text=context_text,
+                query=query
+            )
         else:
-            reponse = await self.llm.ainvoke(prompt)
-            return reponse
-
-
-    async def chat_stream(self, query: str, contexts: List[str]):
+            # 无相关内容
+            print(f"⚠️ [RAG] 无相关内容，使用通用知识")
+            return prompt_without_context.format(query=query)
+        
+    async def chat_stream(self, query: str, contexts: List[dict]):
         """流式聊天生成器"""
-        context_text = "\n\n".join(contexts)
-        prompt = f"""你是一个智能助手。请基于以下上下文信息回答问题。如果上下文中没有相关信息，请说明你不知道。
-
-    上下文信息：
-    {context_text}
-
-    问题：{query}
-
-    请用简洁、准确的语言回答："""
-
-        print(f"🔍 [RAG] 流式生成，prompt 长度：{len(prompt)}")
-
+        # 构建 Prompt
+        prompt = self._build_prompt(query, contexts)
+        
+        print(f"🔍 [RAG] 流式生成，上下文数量：{len(contexts)}")
+        print(f"🔍 [RAG] Prompt 长度：{len(prompt)}")
+        
         try:
             for chunk in self.llm.stream(prompt):
-                print(f"📝 [RAG] LLM chunk: {repr(chunk)}")
                 yield chunk
         except Exception as e:
             print(f"❌ [RAG] 流式生成失败：{e}")
             raise
+
+    async def generate_answer(
+            self,
+            query: str,
+            contexts: List[dict],
+            stream: bool = True,
+        ):
+            """生成答案（非流式）"""
+            prompt = self._build_prompt(query, contexts)
+            
+            if stream:
+                return self.llm.stream(prompt)
+            else:
+                response = await self.llm.ainvoke(prompt)
+                return response
 
 
 # 单例

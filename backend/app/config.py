@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+from typing import Optional
 
 
 class Settings(BaseSettings):
@@ -23,9 +24,19 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
+ 
+    SIMILARITY_THRESHOLD: float = 0.5
+    MAX_CONTEXT_LENGTH: int = 4000
+    DEFAULT_TOP_K: int = 5
+
+
+    RAG_PROMPT_WITH_CONTEXT: Optional[str] = None
+    RAG_PROMPT_WITHOUT_CONTEXT: Optional[str] = None
+
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "ignore"
 
 
 @lru_cache()

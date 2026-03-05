@@ -3,7 +3,7 @@ __pycache__/
 *.py[cod]
 .venv/
 .venv/bin/
-uv.lock
+
 .python-version
 .env
 .env.local

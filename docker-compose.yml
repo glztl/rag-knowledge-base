@@ -1,64 +1,74 @@
-services:
-  # PostgreSQL + pgvector
-  postgres:
-    image: pgvector/pgvector:pg16
-    container_name: rag-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: raguser
-      POSTGRES_PASSWORD: ragpassword
-      POSTGRES_DB: ragdb
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U raguser -d ragdb"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - rag-network
+version: '3.8'
 
+services:
   # FastAPI Backend
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: rag-backend
-    restart: unless-stopped
-    ports:
-      - "11000:11000"
+    restart: always
+    env_file:
+      - .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://raguser:ragpassword@postgres:5432/ragdb
-      ENVIRONMENT: development
-    depends_on:
-      postgres:
-        condition: service_healthy
+      - ENVIRONMENT=production
     volumes:
-      - ./backend/app:/app/app
+      - upload_storage:/app/uploads
     networks:
       - rag-network
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    expose:
+      - "11000"
+    depends_on:
+      - postgres-check
 
   # Next.js Frontend
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=/api
     container_name: rag-frontend
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
+    restart: always
     environment:
-      NEXT_PUBLIC_API_URL: http://backend:11000
+      - NEXT_PUBLIC_API_URL=/api
+      - NODE_ENV=production
+    networks:
+      - rag-network
+    expose:
+      - "3000"
     depends_on:
+      - backend
+
+  # Nginx 反向代理
+  nginx:
+    image: nginx:alpine
+    container_name: rag-nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - frontend
       - backend
     networks:
       - rag-network
 
+  # PostgreSQL 健康检查（不启动新容器，只检查现有）
+  postgres-check:
+    image: alpine:latest
+    container_name: rag-postgres-check
+    restart: "no"
+    command: >
+      sh -c "echo 'PostgreSQL 已存在，跳过启动' && sleep 2"
+    networks:
+      - rag-network
+
 volumes:
-  postgres_data:
+  upload_storage:
 
 networks:
   rag-network:

@@ -1,5 +1,11 @@
 # rag-knowledge-base
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Next.js](https://img.shields.io/badge/Next.js-16.1.6-black?logo=next.js)](https://nextjs.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.134.0-green?logo=fastapi)](https://fastapi.tiangolo.com/)
+[![Docker](https://img.shields.io/badge/Docker-ready-blue?logo=docker)](https://www.docker.com/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-blue?logo=postgresql)](https://www.postgresql.org/)
+
 A modern, full-stack Retrieval-Augmented Generation (RAG) knowledge base system, featuring a FastAPI backend and a Next.js (React) frontend. Supports document upload, semantic search, and conversational Q&A.
 
 ---
@@ -67,12 +73,17 @@ docker-compose up --build
 - **Auth:** JWT, Passlib
 - **Deployment:** Docker, Nginx
 
-## Contributing | 贡献指南
-欢迎 PR 与 Issue！请遵循 [Conventional Commits](https://www.conventionalcommits.org/) 规范。
+## Online Demo | 在线演示
+> Coming soon! 敬请期待！
+
+## Community & Support | 社区与支持
+- Issue 反馈与建议
+- 邮箱：tianlunnn@gmail.com
+
 
 ## License | 许可证
 MIT
 
 ---
 
-> Made with ❤️ by rag-knowledge-base Team
+> Made with ❤️ by glztl

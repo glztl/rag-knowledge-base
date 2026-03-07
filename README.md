@@ -86,4 +86,4 @@ MIT
 
 ---
 
-> Made with ❤️ by glztl
+> Made with ![alt text](frontend/public/milkcat.svg) by glztl
